@@ -1,0 +1,29 @@
+[Unit]
+Description=Course registration portal APP
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# 전용 계정 없이 매번 임시 사용자로 실행한다.
+DynamicUser=yes
+# DynamicUser 환경에는 홈 디렉터리가 없어서 AWS SDK가 시작하지 못한다.
+# 서비스 전용 디렉터리를 만들고 HOME으로 지정한다.
+StateDirectory=portal-app
+StateDirectoryMode=0700
+Environment=HOME=/var/lib/portal-app
+Environment=NODE_ENV=production
+# 사용자 데이터가 만든 연결 정보 (DB_HOST, DB_SECRET_ID, SESSION_SECRET_ID, REDIS_URL, AWS_REGION)
+EnvironmentFile=/etc/portal-app.env
+WorkingDirectory=/srv/portal/app
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

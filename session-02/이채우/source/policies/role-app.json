@@ -1,0 +1,20 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadAppArtifact",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::본인-버킷-이름/app.tar.gz"
+    },
+    {
+      "Sid": "ReadDbAndSessionSecrets",
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": [
+        "본인-RDS-마스터-자격-증명-ARN",
+        "본인-세션-보안-암호의-전체-ARN"
+      ]
+    }
+  ]
+}

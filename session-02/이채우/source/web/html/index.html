@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>수강신청 포털</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">UOS</span>
+      <h1>수강신청 포털</h1>
+    </div>
+    <div class="user-area" id="user-area" hidden>
+      <span id="user-name"></span>
+      <button type="button" class="btn ghost" id="logout-btn">로그아웃</button>
+    </div>
+  </header>
+
+  <section class="servers" aria-label="처리 서버">
+    <div class="server">
+      <span class="server-label">WEB</span>
+      <code id="web-server">-</code>
+    </div>
+    <div class="server">
+      <span class="server-label">APP</span>
+      <code id="app-server">-</code>
+    </div>
+    <div class="server muted">
+      <span class="server-label">응답 시각</span>
+      <code id="served-at">-</code>
+    </div>
+  </section>
+
+  <main>
+    <section class="card login" id="login-view" hidden>
+      <h2>로그인</h2>
+      <p class="hint">실습용 계정: test01 ~ test30</p>
+      <form id="login-form" autocomplete="on">
+        <label>아이디
+          <input name="username" id="username" required autocomplete="username" placeholder="test01">
+        </label>
+        <label>비밀번호
+          <input name="password" id="password" type="password" required autocomplete="current-password">
+        </label>
+        <button type="submit" class="btn primary">로그인</button>
+      </form>
+    </section>
+
+    <div id="main-view" hidden>
+      <section class="card summary">
+        <div>
+          <h2>내 신청 내역</h2>
+          <p class="hint" id="summary-text">-</p>
+        </div>
+        <button type="button" class="btn ghost" id="refresh-btn">새로고침</button>
+      </section>
+
+      <section class="card">
+        <ul class="my-list" id="my-list"></ul>
+      </section>
+
+      <section class="card">
+        <h2>개설 강좌</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>과목코드</th>
+                <th>과목명</th>
+                <th>담당</th>
+                <th>시간</th>
+                <th class="num">학점</th>
+                <th class="num">신청/정원</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="course-rows"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <p class="toast" id="toast" role="status" aria-live="polite" hidden></p>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,153 @@
+:root {
+  --bg: #f4f5f7;
+  --card: #ffffff;
+  --text: #1c2430;
+  --muted: #6b7686;
+  --line: #e2e6ec;
+  --brand: #1f4e8c;
+  --brand-ink: #ffffff;
+  --accent: #e8eef7;
+  --danger: #b42318;
+  --radius: 10px;
+  font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 24px;
+  background: var(--brand);
+  color: var(--brand-ink);
+}
+
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand h1 { margin: 0; font-size: 18px; font-weight: 700; }
+.brand-mark {
+  padding: 2px 8px;
+  border: 1.5px solid currentColor;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.user-area { display: flex; align-items: center; gap: 12px; font-size: 14px; }
+.user-area .btn.ghost { color: var(--brand-ink); border-color: rgba(255, 255, 255, 0.5); }
+
+.servers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  padding: 10px 24px;
+  background: var(--accent);
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.server { display: flex; align-items: center; gap: 8px; }
+.server-label {
+  font-weight: 700;
+  color: var(--brand);
+  min-width: 34px;
+}
+.server.muted .server-label { color: var(--muted); font-weight: 600; }
+.server code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+
+main {
+  max-width: 980px;
+  margin: 24px auto;
+  padding: 0 16px;
+  display: grid;
+  gap: 16px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+.card h2 { margin: 0 0 12px; font-size: 16px; }
+.hint { margin: 0; color: var(--muted); font-size: 13px; }
+
+.login { max-width: 380px; width: 100%; margin: 24px auto; }
+.login form { display: grid; gap: 14px; margin-top: 16px; }
+.login label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
+.login input {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+}
+.login input:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
+
+.summary { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.summary h2 { margin-bottom: 4px; }
+
+.my-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.my-list li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.my-list li span { color: var(--muted); font-size: 13px; }
+.my-list li.empty { color: var(--muted); justify-content: center; border-style: dashed; }
+
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; font-size: 13px; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+td.full { color: var(--danger); font-weight: 600; }
+td.action { text-align: right; }
+
+.btn {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn.small { padding: 5px 12px; font-size: 13px; }
+.btn.primary { background: var(--brand); color: var(--brand-ink); }
+.btn.primary:disabled { background: #b8c2cf; cursor: not-allowed; }
+.btn.ghost { background: transparent; border-color: var(--line); color: var(--text); }
+.btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 10px 18px;
+  border-radius: 8px;
+  background: var(--text);
+  color: #fff;
+  font-size: 14px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+}
+.toast.error { background: var(--danger); }
+
+[hidden] { display: none !important; }
+
+@media (max-width: 600px) {
+  .topbar, .servers { padding-left: 16px; padding-right: 16px; }
+  .card { padding: 16px; }
+}
