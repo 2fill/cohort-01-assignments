@@ -210,7 +210,6 @@ node scripts/watch.mjs http://fill-asbg-alb-public-718249319.ap-northeast-2.elb.
 
 - EC2에서 APP 서버 하나 지움 → 504 뜨면서 로그인 풀림 → 수강신청 화면 돌아옴
 - 401 안 뜸 → 서버 바뀌어도 쿠키 안정, 세션이 Valkey에 공유
-
 ### B. WEB 서버 1대 종료
 
 ### C. 부하 (서버 자동 증가)
