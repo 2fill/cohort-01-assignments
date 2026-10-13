@@ -1,225 +1,183 @@
-# Session 02 "수강신청 서비스 AWS 구축 및 검증" 공부 기록
+# Session 02 · Assignment
+
+- 제출자: 이채우
+
+## 1. What I Built
+
+수강신청 포털을 **WEB · APP · DB 3-Tier**로 AWS에 직접 구축했습니다.
+
+| 문제 | 해결 방법 |
+|---|---|
+| 로그인 끊김 | 로그인 세션을 ElastiCache Valkey에 저장해 모든 APP 서버가 공유, 세션 서명 키도 Secrets Manager의 같은 값을 사용 |
+| 장애 대응 지연 | ALB 상태 검사(`/health`)로 죽은 서버를 자동 제외, Auto Scaling이 새 서버로 자동 교체 |
+| 접속량 변화 대응 | APP Auto Scaling에 평균 CPU 50% 목표 추적 정책 적용 |
+
+요청 흐름: 사용자 → Public ALB → WEB(Nginx) → Internal ALB → APP(Node.js :8080) → RDS / Valkey
+
+소스 코드
 
 ```text
 source/
-├── pack.sh                  배포 파일 2개 생성 (dist/app.tar.gz, dist/web.tar.gz)
-├── app/                     APP (Node.js, 포트 8080)
-│   ├── server.js
-│   ├── package.json / package-lock.json
-│   └── portal-app.service   systemd 서비스 (DynamicUser + HOME 설정 포함)
-├── web/                     WEB (Nginx)
-│   ├── nginx.conf           __APP_ALB__, __WEB_INSTANCE__
-│   └── html/                index.html, app.js, style.css
-├── userdata/                시작 템플릿에 붙여 넣을 스크립트 (app.sh, web.sh)
-├── policies/                EC2 역할 인라인 정책 (role-app.json, role-web.json)
-└── scripts/watch.mjs        관찰 스크립트
+├── pack.sh              app.tar.gz, web.tar.gz 생성
+├── app/                 APP (Node.js, 포트 8080)
+├── web/                 WEB (Nginx)
+├── userdata/            시작 템플릿 사용자 데이터 (app.sh, web.sh)
+├── policies/            EC2 역할 인라인 정책
+└── scripts/watch.mjs    관찰 스크립트 (1초마다 로그인 상태와 응답 확인)
 ```
 
+## 2. Design Decisions
 
-## APP 환경 변수
+### 아키텍처 다이어그램
 
-| 변수 | 내용 |
-|---|---|
-| `DB_HOST` | RDS 엔드포인트 |
-| `DB_SECRET_ID` | RDS 마스터 자격 증명 ARN |
-| `SESSION_SECRET_ID` | 세션 서명 키 보안 암호 이름 (`fill-asbg/session-secret`) |
-| `REDIS_URL` | `rediss://캐시-엔드포인트:6379` |
-| `AWS_REGION` | `ap-northeast-2` |
 
-## API
-
-| 경로 | 설명 |
-|---|---|
-| `GET /health` | ALB 상태 검사 |
-| `POST /api/login` | 로그인, 세션을 Valkey에 저장 |
-| `POST /api/logout` | 로그아웃 |
-| `GET /api/me` | 로그인 사용자와 처리한 APP 인스턴스·AZ |
-| `GET /api/courses` | 강좌 목록 (로그인 없이 조회, 부하 시험용) |
-| `GET /api/enrollments` | 내 신청 내역 |
-| `POST /api/enrollments` | 수강신청 `{ "courseId": 1 }` |
-| `DELETE /api/enrollments/:courseId` | 신청 취소 |
-
-모든 응답에 `X-App-Instance` 헤더가, WEB을 거친 응답에는 `X-Web-Instance` 헤더가 붙는다.
-
-테스트 계정: `test01` ~ `test30`, 비밀번호 `asbg1234` (처음 시작한 APP이 DB와 함께 생성)
-## 1. VPC 생성
-
-| 설정 | 의미 |
-|---|---|
-| DNS 확인 활성화 (이름을 찾을 수 있게) | VPC 안에서 AWS가 제공하는 DNS 서버를 쓸 수 있음 |
-| DNS 호스트 이름 활성화 (이름을 가질 수 있게) | EC2 같은 리소스에 DNS 이름을 자동으로 붙여줌 |
-
-## 2. 서브넷 생성
-
-퍼블릭 IPv4 자동 할당 비활성화
-
-→ EC2를 띄울 때 공인 IP를 붙일지 설정
-
-→ app-a/c: 들어오는 요청은 ALB, 나가는 통신은 NAT로 처리해서 필요 없음
-
-| 서브넷 | 용도 |
-|---|---|
-| `public-a` | Public ALB, NAT |
-| `public-c` | Public ALB |
-| `app-a/c` | WEB EC2, APP EC2, Internal ALB |
-| `data-a/c` | RDS, Valkey |
-
-## 3. 인터넷 게이트웨이 생성 및 VPC에 연결
-
-`fill-asbg-igw`
-
-## 4. NAT Gateway 생성
-
-`fill-asbgnat-a`
-
-| 유형 | 설명 |
-|---|---|
-| 영역별 (선택) | 출구를 서브넷 하나에만 만들기 |
-| ~~리전별~~ | ~~출구를 VPC 전체에 하나 만들기~~ |
-
-## 5. 라우팅 테이블 생성 및 서브넷 연결
-
-| 라우팅 테이블 | 연결 | 의미 |
-|---|---|---|
-| `fill-asbg-rt-public` | 인터넷 게이트웨이 | 양방향 통신 |
-| `fill-asbg-rt-app` | NAT 게이트웨이 | 나가는 것만 허용 |
-| `fill-asbg-rt-data` | 없음 | - |
-
-## 6. 엔드포인트 생성
-
-EC2가 부팅하면서 S3에 있는 파일을 내려받음
-
-→ 이때 S3 주소로 가는 건 엔드포인트로 보내라!
-
-`fill-asbg-vpce-s3`
-
-| 구분 | 경로 |
-|---|---|
-| 엔드포인트가 없으면 | APP 서버 → NAT → 인터넷 → S3 |
-| 엔드포인트가 있으면 | APP 서버 → S3 |
-
-## 7. 보안 그룹 생성
-
-| 대상 | 접근 | 보안 그룹 | 인바운드 | 소스 |
-|---|---|---|---|---|
-| Public ALB | 아무나 접근 가능 | `fill-asbg-sg-alb-public` | HTTP | 0.0.0.0/0 |
-| WEB | Public ALB만 접근 가능 | `fill-asbg-sg-web` | HTTP | `fill-asbg-sg-alb-public` |
-| Internal ALB | WEB만 접근 가능 | `fill-asbg-sg-alb-internal` | HTTP | `fill-asbg-sg-web` |
-| APP | Internal ALB만 접근 가능 | `fill-asbg-sg-app` | 사용자 지정 TCP 8080 | `fill-asbg-sg-alb-internal` |
-| DB | APP만 접근 가능 | `fill-asbg-sg-db` | MYSQL/Aurora TCP 3306 | `fill-asbg-sg-app` |
-| 캐시 | APP만 접근 가능 | `fill-asbg-sg-cache` | 사용자 지정 TCP 6379-6380 | `fill-asbg-sg-app` |
-
-## 8. DB 서브넷 그룹 생성
-
-RDS에게 서브넷 그룹 단위로 DB를 만들 수 있도록 도와줌
-
-- 2개 생성 → 본 DB + 예비 DB
-- data 서브넷
-
-## 9. ElastiCache - Valkey 캐시 생성
-
-로그인 세션을 모든 APP 서버가 공유 → 서버가 바뀌어도 로그인 유지
-
-**Valkey + Serverless**
-
-- Redis와 같은 방식으로 쓰는 저장소
-- 서버 크기 고를 필요 없이, AWS가 알아서 확장
-- 가장 안전한 `data-a`, `data-c` 두 AZ에 걸쳐둠
-
-**보안**
-
-| 항목 | 설정 |
-|---|---|
-| 보안 그룹 | `sg-cache`만 → APP 서버만 접근 가능 |
-| 액세스 제어 | 없음 (비밀번호 대신 VPC + `sg-cache`) |
-
-```text
-rediss://fill-asbg-cache-kvwisl.serverless.apn2.cache.amazonaws.com:6379
+```mermaid
+flowchart LR
+    User(["사용자"]) --> PALB["Public ALB<br/>public-a / public-c"]
+    PALB --> WEB["WEB EC2 x2 (Nginx)<br/>app-a / app-c"]
+    WEB --> IALB["Internal ALB<br/>app-a / app-c"]
+    IALB --> APP["APP EC2 x2 (Node.js :8080)<br/>app-a / app-c"]
+    APP --> RDS[("RDS MySQL Multi-AZ<br/>data-a / data-c")]
+    APP --> VK[("Valkey Serverless<br/>세션 저장 / data-a, data-c")]
+    APP -.->|"시크릿 읽기"| SM["Secrets Manager"]
+    APP -.->|"나가는 통신"| NAT["NAT Gateway<br/>public-a"]
+    NAT --> IGW["Internet Gateway"]
+    APP -.->|"코드 내려받기"| S3[("S3<br/>app / web tar.gz")]
 ```
 
-## 10. 애플리케이션 배포 준비
+### 서비스 구성
 
-**소스 코드 패키징**
+| 계층 | 구성 | 위치 | 역할과 선택 이유 |
+|---|---|---|---|
+| 입구 | Public ALB | public-a, public-c | 인터넷 요청을 받아 WEB으로 분산, 2개 AZ에 걸쳐 한 AZ가 죽어도 유지 |
+| WEB | Nginx on EC2 (Auto Scaling) | app-a, app-c | 화면 파일 제공, `/api` 요청은 Internal ALB로 전달 |
+| 내부 연결 | Internal ALB | app-a, app-c | APP 서버 상태 검사와 분산, WEB이 APP 서버 주소를 몰라도 되게 함 |
+| APP | Node.js on EC2 (Auto Scaling, 포트 8080) | app-a, app-c | 로그인과 수강신청 처리 |
+| DB | RDS MySQL (Multi-AZ) | data-a, data-c | 본 DB 장애 시 예비 DB로 전환 |
+| 세션 저장소 | ElastiCache Valkey Serverless | data-a, data-c | 모든 APP이 세션을 공유해 서버가 바뀌어도 로그인 유지 |
+| 출구 | NAT Gateway (public-a), Internet Gateway | public-a | 사설 서브넷 서버의 나가는 통신 |
 
-APP은 `app.tar.gz`, WEB은 `web.tar.gz`로 묶어서 서버가 내려받기 쉽게 만듦
+### 주요 설정
 
-서버 새로 띄울 때마다 같은 파일을 받음
+**네트워크**
 
-**S3 버킷에 업로드** ~~(USB 느낌…)~~
-
-- 버킷 최상위에 `app.tar.gz`, `web.tar.gz` 저장
-- 서버가 시작할 때 여기서 코드를 가져감
-- 보안: IAM 역할을 가진 서버만
-
-**세션 서명 키 만들기 (Secrets Manager)**
-
-`fill-asbg/session-secret`
-
-- 로그인 쿠키 만들 때 쓰는 비밀 키
-- 모든 APP 서버가 같은 키를 읽음
-
-## 11. IAM 역할 생성
-
-`AmazonSSMManagedInstanceCore` → 키 없이 콘솔로 서버 접속
-
-| 역할 | 인라인 정책 |
-|---|---|
-| `fill-asbg-rold-web` | S3의 `web.tar.gz` 읽기만 허용 |
-| `fill-asbg-role-app` | S3의 `app.tar.gz` 읽기, Secrets Manager 2개(RDS 비밀번호, 세션 키) 읽기 |
-
-## 12. 로드 밸런서와 대상 그룹 설정
-
-사용자 → Public ALB → WEB(Nginx) → Internal ALB → APP(Node) → RDS / Valkey
-
-| 구분 | 대상 그룹 | 로드 밸런서 |
+| 설정 | 값 | 이유 |
 |---|---|---|
-| WEB (외부) | `fill-asbg-tg-web` (포트 80, 상태 검사 `/health`) | Public ALB (`fill-asbg-alb-public`): public 서브넷 2개 AZ, `sg-alb-public`, HTTP → WEB |
-| APP (내부) | `fill-asbg-tg-app` (포트 8080, 상태 검사 `/health`) | Internal ALB (`fill-asbg-alb-internal`): app 서브넷 2개 AZ, `sg-alb-internal`, HTTP 80 → APP |
+| VPC | `10.20.0.0/16`, DNS 확인·DNS 호스트 이름 활성화 | VPC 안에서 AWS DNS를 쓰고, DNS 이름을 자동으로 붙이기 위함 |
+| 서브넷 6개 | public / app / data × a, c | 계층을 나누고 2개 AZ에 배치. 퍼블릭 IPv4 자동 할당은 **비활성화** |
+| NAT Gateway | 영역별(Zonal), public-a 1개 | 비용 절감 |
+| `rt-public` | 인터넷 게이트웨이 | 양방향 통신 |
+| `rt-app` | NAT 게이트웨이 | 나가는 통신만 허용 |
+| `rt-data` | 인터넷 경로 없음 | 인터넷과 완전히 분리 |
+| S3 게이트웨이 엔드포인트 | `fill-asbg-vpce-s3` | 부팅 시 S3 다운로드가 NAT와 인터넷을 거치지 않음 |
 
-## 13. 시작 템플릿 생성
+**보안 그룹 (앞 단계 그룹에서 온 트래픽만 받음)**
 
-서버가 늘거나 교체될 때마다 같은 설정으로 시작
-
-| 항목 | `fill-asbg-lt-app` | `fill-asbg-lt-web` |
+| 보안 그룹 | 인바운드 | 소스 |
 |---|---|---|
-| AMI | Amazon Linux 2023 | Amazon Linux 2023 |
-| 유형 | t3.micro | t3.micro |
-| 보안 그룹 | `sg-app` | `sg-web` |
-| IAM 프로파일 | `fill-asbg-role-app` | `fill-asbg-rold-web` |
-| 사용자 데이터 | `app.sh` | `web.sh` |
+| `fill-asbg-sg-alb-public` | HTTP 80 | 0.0.0.0/0 |
+| `fill-asbg-sg-web` | HTTP 80 | `sg-alb-public` |
+| `fill-asbg-sg-alb-internal` | HTTP 80 | `sg-web` |
+| `fill-asbg-sg-app` | TCP 8080 | `sg-alb-internal` |
+| `fill-asbg-sg-db` | MySQL 3306 | `sg-app` |
+| `fill-asbg-sg-cache` | TCP 6379-6380 | `sg-app` |
 
-## 14. Auto Scaling 그룹 생성
+→ 인터넷에서 직접 닿는 곳은 Public ALB뿐이고, DB와 캐시는 APP에서만 접근할 수 있습니다.
 
-서버 수 자동 맞춤 (죽으면 새로 만들고, 바쁘면 늘림)
+**데이터 보호와 권한**
 
-| 크기 조정 정책 (APP) | 설명 |
-|---|---|
-| 평균 CPU 사용률 50% 유지 | 넘으면 서버 늘림 |
+| 설정 | 값 | 이유 |
+|---|---|---|
+| DB 비밀번호 | RDS 관리형 시크릿 (Secrets Manager) | 코드와 사용자 데이터에 비밀번호를 적지 않기 위함 |
+| 세션 서명 키 | `fill-asbg/session-secret` (Secrets Manager) | 모든 APP이 같은 키를 읽어, 어느 서버가 발급한 쿠키든 다른 서버가 인정 |
+| 접속 방식 | Valkey `rediss://` (TLS), RDS는 인증서 검증 TLS | 서버 간 통신 암호화 |
+| IAM `fill-asbg-rold-web` | S3 `web.tar.gz` 읽기만 | 최소 권한. WEB은 DB 비밀번호를 읽을 수 없음 |
+| IAM `fill-asbg-role-app` | S3 `app.tar.gz` 읽기, Secrets Manager 2개 읽기 | APP에 필요한 것만 허용 |
+| 공통 | `AmazonSSMManagedInstanceCore` | SSH 키 없이 Session Manager로 접속 |
+| S3 버킷 | 최상위에 `app.tar.gz`, `web.tar.gz`, IAM 역할을 가진 서버만 접근 | 서버가 부팅할 때마다 같은 파일을 받게 함 |
 
-## 15. 테스트
+**로드 밸런서 · 시작 템플릿 · Auto Scaling**
 
-서비스 관찰 스크립트
+| 설정 | 값 | 이유 |
+|---|---|---|
+| 대상 그룹 | `tg-web` (포트 80), `tg-app` (포트 8080) | 계층별로 상태 검사 |
+| 상태 검사 | `/health`, HTTP 200, 간격 10초, 정상 3회, 비정상 2회, 제한 시간 5초 | 비정상 2회 × 10초로 약 20초 안에 장애 서버 제외 |
+| `/health` 검사 범위 | APP 프로세스 응답만 확인 (DB·캐시 제외) | 정상 APP까지 교체되는 연쇄 교체 방지 |
+| 시작 템플릿 | Amazon Linux 2023, t3.micro, `lt-app` / `lt-web` | 서버가 늘거나 교체될 때마다 같은 설정으로 시작 |
+| Auto Scaling 그룹 | `asg-app`, `asg-web` | 죽으면 새로 만들고 AZ a, c에 나눠 배치 |
+| 크기 조정 정책 (APP) | 대상 추적, 평균 CPU 50%, 워밍업 300초 | 로그인이 CPU를 많이 쓰는 작업임을 고려 |
+
+###
+
+## 3. Troubleshooting & Validation
+
+### 3.1 트러블슈팅: WEB / APP이 Unhealthy (`Request timed out`)로 나타나는 현상
+
+- 점검 대상: 대상 그룹 상태가 Unhealthy, 접속 시 `Request timed out`
+- 확인 과정과 조치:
+  - 원인 확인: EC2 → 인스턴스 → 보안 탭에서 서버에 `sg-web`설정 누락
+  - 조치: 시작 템플릿 새 버전에서 보안 그룹 변경 → Auto Scaling 그룹의 템플릿 버전 변경 → 기존 서버 종료
+- 결과와 근거: 새로 뜬 서버가 `sg-web`, `sg-app`을 붙이고 대상 그룹에서 Healthy로 전환됨
+- 검증 범위와 한계: 서브넷·라우팅 문제는 따로 시험하지 않음
+
+### 3.2 트러블슈팅: APP 서버가 계속 재시작 (`AccessDenied`)
+
+- 점검 대상: APP이 Healthy가 되지 않고 계속 재시작
+- 확인 과정과 조치:
+  - 원인 확인: Session Manager 접속 → `journalctl -u portal-app`에서 `AccessDenied`. APP 역할 인라인 정책에 세션 시크릿 ARN이 빠져 있었음 (RDS 시크릿 ARN만 두 번 들어감)
+  - 조치: 정책 Resource에 `...:secret:fill-asbg/session-secret-*` 추가 (서버 교체 없이 자동 복구)
+- 결과와 근거: APP이 시작되어 `tg-app`이 Healthy로 전환, 로그인 가능
+- 검증 범위와 한계: 다른 권한(S3, RDS 시크릿)은 정상 동작한 상태에서 따로 점검하지 않음
+
+### 3.3 검증: 서버 종료 실험
+
+- 점검 대상: 로그인 유지, 장애 서버 제외와 자동 복구
+- 확인 과정과 조치: 관찰 스크립트 `scripts/watch.mjs`로 한 번 로그인한 쿠키를 가지고 1초마다 `/api/me`, `/api/courses`를 호출하며, 이때 EC2에서 서버 한 대를 종료함. (`me 401`이 나오면 로그인이 풀린 것)
 
 ```bash
-node scripts/watch.mjs http://fill-asbg-alb-public-718249319.ap-northeast-2.elb.amazonaws.com
+node scripts/watch.mjs http://<Public-ALB-DNS>
 ```
 
-### A. APP 서버 1대 종료 (세션 공유 + 장애 복구)
-
-**결과**
-
-- EC2에서 APP 서버 하나 지움 → 504 뜨면서 로그인 풀림 → 수강신청 화면 돌아옴
-- 401 안 뜸 → 서버 바뀌어도 쿠키 안정, 세션이 Valkey에 공유
-### B. WEB 서버 1대 종료
-
-### C. 부하 (서버 자동 증가)
-
-부하 생성 명령어
+- 결과와 근거:
+  - **A. APP 1대 종료**: 브라우저에서 잠깐 504가 뜬 뒤 비밀번호 입력 없이 수강신청 화면으로 돌아옴. 관찰 스크립트에서 `me 401`이 한 번도 나오지 않음. 약 19초 동안 502 / timeout이 섞인 뒤 정상 복구. Auto Scaling이 새 서버를 만들어 Healthy 2대로 복구. (4번 "APP 서버 종료")
+    - 약 19초는 상태 검사(10초 간격 × 연속 2회 실패)로 ALB가 죽은 서버를 제외하기까지의 시간이며 정상 동작
+    - `me 401`이 없는 것은 세션이 Valkey에 공유되고 서명 키가 같다는 근거
+  - **B. WEB 1대 종료**: WEB 서버 1대를 종료하자 15:43:56부터 15:44:13까지 약 18초 동안 오류가 섞였다. 처음 약 7초는 `me 502`, 이어서 약 4초는 timeout, 이후에는 timeout과 정상(`me 200`)이 번갈아 나오다가 15:44:14부터 `me`와 `courses`가 모두 정상으로 이어졌다. 이 구간 동안 `me 401`은 한 번도 나오지 않았고, `me 200 test01`이 APP 서버가 바뀌어도(`i-0b0fe...`, `i-074e9...`) 계속 같은 사용자로 응답했다. 정상 응답은 남은 WEB 서버 `i-021cce7311`(2c)이 처리했다. (4번 "WEB 서버 종료")
+    - 오류가 약 18초 이어진 것은 상태 검사(10초 간격 × 연속 2회 실패)로 ALB가 종료된 WEB 서버를 제외하기까지의 시간이며, A와 같은 패턴이다.
+    - WEB은 세션을 저장하지 않고 쿠키는 APP이 Valkey 세션으로 검증하므로, WEB 서버가 바뀌어도 로그인이 유지된다.
+  - **C. 부하로 서버 자동 증가**: 평균 CPU가 50%를 넘으면 3대, 약 75%를 넘으면 4대(최대)로 늘어난다. 서버를 한 대 줄여도 평균 CPU가 50%를 넘지 않을 때 줄어든다. 4대 → 3대는 약 37% 미만, 3대 → 2대는 약 33% 미만이며, 확장보다 느리게 반영된다.
+- 검증 범위와 한계: 서버 한 대 종료까지만 확인했고, AZ 전체 장애나 DB Multi-AZ 전환은 시험하지 않음.
 
 ```bash
-hey -z 5m -c 100 http://fill-asbg-alb-public-718249319.ap-northeast-2.elb.amazonaws.com/api/courses
+hey -z 5m -c 100 http://<Public-ALB-DNS>/api/courses
 ```
 
-## 16. 다 지우기
+## 4. Screenshots
 
-Auto Scaling 그룹 → 로드 밸런서 → 대상 그룹 → 시작 템플릿 → 데이터베이스 → Valkey 캐시 → NAT 게이트웨이 → 탄력적 IP → 엔드포인트 → VPC → S3 → Secrets Manager → IAM 역할
+**완료 조건: 로그인 유지**
+
+- 확인 방법: 관찰 스크립트로 로그인 후 1초마다 `/api/me`를 호출하면서 APP 서버 1대를 종료
+- 확인 결과: `401`이 나오지 않음 → **충족**
+
+**완료 조건: 장애 서버 감지·제외와 자동 복구 (APP)**
+
+- 확인 방법: APP 서버 1대를 종료하고 대상 그룹과 응답 확인
+- 확인 결과: 상태 검사 시간(약 20초) 안에 장애 서버를 제외하고 새 서버로 교체됨. 실제로 약 19초 동안 502 / timeout 후 정상 복구, Healthy 2대로 돌아옴 → **충족**
+
+| 서버 종료 전 | 서버 종료 중 | 서버 종료 후 |
+|---|---|---|
+| ![APP 종료 전](./images/app-before.png) | ![APP 종료 중](./images/app-during.png) | ![APP 종료 후](./images/app-after.png) |
+
+**완료 조건: 장애 서버 감지·제외와 자동 복구 (WEB)**
+
+- 확인 방법: WEB 서버 1대를 종료하고 대상 그룹과 응답 확인
+- 확인 결과: 예상은 종료된 서버가 제외되고 남은 서버로 요청이 이어지며 로그인이 유지됨. 실제로 약 18초(15:43:56~15:44:13) 동안 502 / timeout이 섞인 뒤 정상 복구, Healthy 2대로 돌아옴 → **충족**
+
+| 서버 종료 전 | 서버 종료 중 | 서버 종료 후 |
+|---|---|---|
+| ![WEB 종료 전](./images/web-before.png) | ![WEB 종료 중](./images/web-during.png) | ![WEB 종료 후](./images/web-after.png) |
+
+완료 조건: 요청량에 따른 서버 수 자동 조정**
+
+- 확인 방법: `hey`로 `/api/courses`에 5분간 동시 100 요청을 보내고 Auto Scaling 그룹의 CPU와 서버 수를 확인
+- 확인 결과: 예상은 평균 CPU가 50%를 넘으면 서버가 늘어나는 것. 실제로 평균 CPU가 약 51%까지 올랐고 서버가 2대에서 3대로 늘어남 → **충족**
